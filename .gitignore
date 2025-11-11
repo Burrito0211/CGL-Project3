@@ -23,7 +23,7 @@
 *.dll
 
 # Fortran module files
-*.mod
+*.mods
 *.smod
 
 # Compiled Static libraries
@@ -39,3 +39,7 @@
 
 # debug information files
 *.dwo
+
+lenovo/
+asus/
+pc/
