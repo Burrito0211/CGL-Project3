@@ -49,11 +49,17 @@
 #include "RenderUtilities/Texture.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <chrono>
+
+static float startTime = std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
 
 #define M_PI 3.14159265359
 static std::time_t startTime = std::time(nullptr);
 
 void TrainView::setUBO() {
+	auto now = std::chrono::system_clock::now();
+	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+	float currentTime = ms / 1000.0f - startTime;
 	float wdt = this->pixel_w();
 	float hgt = this->pixel_h();
 
@@ -66,6 +72,12 @@ void TrainView::setUBO() {
 	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), &projection_matrix[0][0]);
 	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), &view_matrix[0][0]);
+
+	if(tw->shaderBrowser->value() == 3) {
+		float timeData[4] = { currentTime, 0.0f, 0.0f, 0.0f };
+		glBufferSubData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), sizeof(timeData), timeData);
+	}
+
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
@@ -505,11 +517,11 @@ void TrainView::drawStuff(bool doingShadows)
 					glColor3ub(240, 240, 30);
 			}
 			m_pTrack->points[i].draw();
-}
+		}
 	}
 	// draw the track
 	//####################################################################
-	if(tw->shaderBrowser->value() == 3)
+	if(tw->shaderBrowser->value() == 3 && tw->runButton->value() == true)
 		updateWater(static_cast<float>(std::difftime(std::time(nullptr), startTime)), 100, 10.0f);
 
 	drawTrack(doingShadows);
@@ -1226,10 +1238,10 @@ void TrainView::drawColoredCastle()  {
 
 void TrainView::drawWave(float time) {
 	
-	this->shader = new Shader("./shaders/temp.vert", nullptr, nullptr, nullptr, "./shaders/temp.frag");
+	this->shader = new Shader("./shaders/wave.vert", nullptr, nullptr, nullptr, "./shaders/wave.frag");
 	this->common_matrices = new UBO();
 
-	this->common_matrices->size = 2 * sizeof(glm::mat4);
+	this->common_matrices->size = 2 * sizeof(glm::mat4) + sizeof(glm::vec4);
 	glGenBuffers(1, &this->common_matrices->ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
 	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, NULL, GL_STATIC_DRAW);
@@ -1239,61 +1251,29 @@ void TrainView::drawWave(float time) {
 	const int N = 100;           // 網格細緻度（越大越平滑）
 	const float SIZE = 10.0f;    // 整體平面大小（10x10）
 
-	for (auto& w : waves)
-		w.frequency = 2.0f * M_PI / w.wavelength;
-
 	// ====== 產生頂點資料 ======
 	float half = SIZE / 2.0f;
 
 	for (int j = 0; j <= N; ++j) {
 		for (int i = 0; i <= N; ++i) {
-			std::time_t now = std::time(nullptr);           
-			float currentTime =  static_cast<float>(std::difftime(now, startTime));
 			float x = (float)i / N * SIZE - SIZE * 0.5f;
 			float z = (float)j / N * SIZE - SIZE * 0.5f;
 
 			// ====== 計算動態波紋高度 ======
-			float h = 0.0f;
-			for (const auto& w : waves) {
-				float phase = glm::dot(w.direction, glm::vec2(x, z)) * w.frequency + w.speed * currentTime;
-				h += w.amplitude * sin(phase);
-			}
-
-			// 頂點位置
 			vertices.push_back(x);
-			vertices.push_back(h);
-			vertices.push_back(z);
+            vertices.push_back(0.0f);  // y = 0 (flat plane)
+            vertices.push_back(z);
 
-			// ====== 法線計算 (簡化：利用微分近似) ======
-			float eps = 0.1f;
-			float hL = 0.0f, hR = 0.0f, hD = 0.0f, hU = 0.0f;
+            normals.push_back(0.0f);
+            normals.push_back(1.0f);
+            normals.push_back(0.0f);
 
-			for (const auto& w : waves) {
-				float phaseL = glm::dot(w.direction, glm::vec2(x - eps, z)) * w.frequency + w.speed * time;
-				float phaseR = glm::dot(w.direction, glm::vec2(x + eps, z)) * w.frequency + w.speed * time;
-				float phaseD = glm::dot(w.direction, glm::vec2(x, z - eps)) * w.frequency + w.speed * time;
-				float phaseU = glm::dot(w.direction, glm::vec2(x, z + eps)) * w.frequency + w.speed * time;
-				hL += w.amplitude * sin(phaseL);
-				hR += w.amplitude * sin(phaseR);
-				hD += w.amplitude * sin(phaseD);
-				hU += w.amplitude * sin(phaseU);
-			}
+            texcoords.push_back((float)i / N);
+            texcoords.push_back((float)j / N);
 
-			glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
-			normals.push_back(normal.x);
-			normals.push_back(normal.y);
-			normals.push_back(normal.z);
-
-			// 貼圖座標
-			texcoords.push_back((float)i / N);
-			texcoords.push_back((float)j / N);
-
-			// 顏色 — 隨高度微微改變
-			float blue = 0.6f + h * 3.0f;
-			float green = 0.5f + h * 2.0f;
-			colors.push_back(0.0f);
-			colors.push_back(glm::clamp(green, 0.0f, 1.0f));
-			colors.push_back(glm::clamp(blue, 0.0f, 1.0f));
+            colors.push_back(0.0f);
+            colors.push_back(0.6f);
+            colors.push_back(1.0f);
 		}
 	}
 

@@ -1,7 +1,7 @@
 #version 330 core
 
-layout (location = 0) in vec3 aPos;        // 原始頂點位置 (x, y, z) — y = 0
-layout (location = 1) in vec3 aNormal;     // 原始法線 (0, 1, 0)
+layout (location = 0) in vec3 aPos;    
+layout (location = 1) in vec3 aNormal;    
 layout (location = 2) in vec2 aTexCoord;
 layout (location = 3) in vec3 aColor;
 
@@ -10,9 +10,14 @@ out vec3 vColor;
 out vec2 vTexCoord;
 
 uniform mat4 model;
-uniform mat4 view;
-uniform mat4 projection;
-uniform float time;
+
+layout (std140, binding = 0) uniform commom_matrices
+{
+    mat4 u_projection;
+    mat4 u_view;
+    float u_time;
+};
+
 
 struct Wave {
     vec2 direction;
@@ -21,17 +26,21 @@ struct Wave {
     float speed;
 };
 
-uniform int waveCount;
-uniform Wave waves[8]; // 最多 8 個波
+ Wave waves[3] = {
+    {{1.0f, 0.0f}, 2.0f, 0.10f, 1.0f},
+    {{0.7f, 0.7f}, 3.0f, 0.05f, 0.8f},
+    {{-0.6f, 0.8f}, 1.5f, 0.07f, 1.2f}
+};
+
+const int waveCount = 3;
 
 void main()
 {
     float y = 0.0;
     vec2 posXZ = aPos.xz;
 
-    // 計算高度
-    for (int i = 0; i < waveCount; ++i) {
-        float phase = dot(waves[i].direction, posXZ) * waves[i].frequency + waves[i].speed * time;
+    for(int i = 0; i < waveCount; ++i) {
+        float phase = dot(waves[i].direction, posXZ) * waves[i].frequency + waves[i].speed * u_time;
         y += waves[i].amplitude * sin(phase);
     }
 
