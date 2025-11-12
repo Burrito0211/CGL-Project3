@@ -510,7 +510,7 @@ void TrainView::drawStuff(bool doingShadows)
 	// draw the track
 	//####################################################################
 	if(tw->shaderBrowser->value() == 3)
-		updateWater(static_cast<float>(std::difftime(std::time(nullptr), startTime)), 10, 1.0f);
+		updateWater(static_cast<float>(std::difftime(std::time(nullptr), startTime)), 100, 10.0f);
 
 	drawTrack(doingShadows);
 	drawSleepers(doingShadows);
@@ -1236,8 +1236,8 @@ void TrainView::drawWave(float time) {
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	// ====== 參數設定 ======
-	const int N = 10;           // 網格細緻度（越大越平滑）
-	const float SIZE = 1.0f;    // 整體平面大小（10x10）
+	const int N = 100;           // 網格細緻度（越大越平滑）
+	const float SIZE = 10.0f;    // 整體平面大小（10x10）
 
 	for (auto& w : waves)
 		w.frequency = 2.0f * M_PI / w.wavelength;
