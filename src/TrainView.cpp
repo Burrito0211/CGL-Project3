@@ -1246,119 +1246,189 @@ void TrainView::drawWave(float time) {
 	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, NULL, GL_STATIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-	// ====== 參數設定 ======
-	const int N = 100;           // 網格細緻度（越大越平滑）
-	const float SIZE = 10.0f;    // 整體平面大小（10x10）
+	const int gridResolution = 10;      // Number of grid divisions
+    const float waterSize = 10.0f;      // Size of water surface
+    
+    // Update wave geometry with current time
+    updateWater(time, gridResolution, waterSize);
 
-	// ====== 產生頂點資料 ======
-	float half = SIZE / 2.0f;
+    // Bind VAO
+    glBindVertexArray(plane->vao);
 
-	for (int j = 0; j <= N; ++j) {
-		for (int i = 0; i <= N; ++i) {
-			float x = (float)i / N * SIZE - SIZE * 0.5f;
-			float z = (float)j / N * SIZE - SIZE * 0.5f;
+    // === UPDATE VERTEX BUFFER (location = 0) ===
+    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[0]);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), 
+                 vertices.data(), GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(0);
 
-			// ====== 計算動態波紋高度 ======
-			vertices.push_back(x);
-            vertices.push_back(0.0f);  // y = 0 (flat plane)
-            vertices.push_back(z);
+    // === UPDATE NORMAL BUFFER (location = 1) ===
+    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[1]);
+    glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(float), 
+                 normals.data(), GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(1);
 
-            normals.push_back(0.0f);
-            normals.push_back(1.0f);
-            normals.push_back(0.0f);
+    // === UPDATE TEXTURE COORDINATE BUFFER (location = 2) ===
+    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[2]);
+    glBufferData(GL_ARRAY_BUFFER, texcoords.size() * sizeof(float), 
+                 texcoords.data(), GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(2);
 
-            texcoords.push_back((float)i / N);
-            texcoords.push_back((float)j / N);
+    // === UPDATE COLOR BUFFER (location = 3) ===
+    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[3]);
+    glBufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(float), 
+                 colors.data(), GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(3);
 
-            colors.push_back(0.0f);
-            colors.push_back(0.6f);
-            colors.push_back(1.0f);
-		}
-	}
+    // === UPDATE ELEMENT BUFFER ===
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, plane->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(GLuint), 
+                 elements.data(), GL_DYNAMIC_DRAW);
 
-	// ====== 產生索引資料 ======
-	for (int j = 0; j < N; ++j) {
-		for (int i = 0; i < N; ++i) {
-			GLuint topLeft = j * (N + 1) + i;
-			GLuint topRight = topLeft + 1;
-			GLuint bottomLeft = (j + 1) * (N + 1) + i;
-			GLuint bottomRight = bottomLeft + 1;
+    plane->element_amount = elements.size();
 
-			elements.push_back(topLeft);
-			elements.push_back(bottomLeft);
-			elements.push_back(topRight);
-
-			elements.push_back(topRight);
-			elements.push_back(bottomLeft);
-			elements.push_back(bottomRight);
-		}
-	}
-
-	// ====== 建立 VAO / VBO ======
-	this->plane = new VAO();
-	this->plane->element_amount = elements.size();
-
-	glGenVertexArrays(1, &this->plane->vao);
-	glGenBuffers(4, this->plane->vbo);
-	glGenBuffers(1, &this->plane->ebo);
-
-	glBindVertexArray(this->plane->vao);
-
-	// 頂點位置
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[0]);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat),
-		vertices.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
-	glEnableVertexAttribArray(0);
-
-	// 法線
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[1]);
-	glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat),
-		normals.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
-	glEnableVertexAttribArray(1);
-
-	// 貼圖座標
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[2]);
-	glBufferData(GL_ARRAY_BUFFER, texcoords.size() * sizeof(GLfloat),
-		texcoords.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (GLvoid*)0);
-	glEnableVertexAttribArray(2);
-
-	// 顏色
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[3]);
-	glBufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(GLfloat),
-		colors.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
-	glEnableVertexAttribArray(3);
-
-	// 索引
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->plane->ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(GLuint),
-		elements.data(), GL_STATIC_DRAW);
-
-	// 解除綁定
-	glBindVertexArray(0);
+    // === SET SHADER AND UNIFORMS ===
+    shader->Use();
+    
+    // Model matrix (identity - water at origin)
+    glm::mat4 model = glm::mat4(1.0f);
+    glUniformMatrix4fv(glGetUniformLocation(shader->Program, "u_model"), 
+                       1, GL_FALSE, glm::value_ptr(model));
+    
+    // Optional: Set lighting parameters in fragment shader
+    glUniform3f(glGetUniformLocation(shader->Program, "lightPosition"), 
+                50.0f, 100.0f, 50.0f);
+    glUniform3f(glGetUniformLocation(shader->Program, "viewPosition"), 
+                0.0f, 50.0f, 100.0f);
+    
+    // === DRAW THE WAVE ===
+    glDrawElements(GL_TRIANGLES, plane->element_amount, GL_UNSIGNED_INT, 0);
+    
+    // Unbind
+    glBindVertexArray(0);
+	this->texture = new Texture2D("./images/wave.png");
 
 }
 
 void TrainView::updateWater(float time, int N, float size) {
-	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
+	vertices.clear();
+    normals.clear();
+    texcoords.clear();
+    colors.clear();
+    elements.clear();
 
-    glm::mat4 view_matrix;
-    glGetFloatv(GL_MODELVIEW_MATRIX, &view_matrix[0][0]);
-    glm::mat4 projection_matrix;
-    glGetFloatv(GL_PROJECTION_MATRIX, &projection_matrix[0][0]);
+    float step = size / N;
 
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), &projection_matrix[0][0]);
-    glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), &view_matrix[0][0]);
+    // Generate vertices for each grid point
+    for (int i = 0; i <= N; ++i) {
+        for (int j = 0; j <= N; ++j) {
+            float x = i * step - size / 2.0f;
+            float z = j * step - size / 2.0f;
 
-    // Time (std140 pad to 16 bytes)
-    float timeData[4] = { time, 0.0f, 0.0f, 0.0f };
-    glBufferSubData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), sizeof(timeData), timeData);
+            // === CALCULATE HEIGHT USING SIN WAVE ===
+            // H(x,y,t) = Σ(A_i × sin(D_i·(x,y) × w_i + t × φ_i))
+            float y = 0.0f;
+            for (const auto& wave : waves) {
+                // w = 2π/L (frequency)
+                float frequency = (2.0f * M_PI) / wave.wavelength;
+                
+                // φ = S × 2π/L (phase speed)
+                float phaseSpeed = wave.speed * frequency;
+                
+                // Phase: D·(x,z) × w + t × φ
+                float phase = (wave.direction.x * x + wave.direction.y * z) * frequency 
+                            + time * phaseSpeed;
+                
+                // Add wave contribution
+                y += wave.amplitude * sin(phase);
+            }
 
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+            // Store vertex position
+            vertices.push_back(x);
+            vertices.push_back(y);
+            vertices.push_back(z);
 
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[3]);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, colors.size() * sizeof(float), colors.data());
+            // === CALCULATE NORMAL USING FINITE DIFFERENCES ===
+            // Normal = (?h/?x, 1, ?h/?z) normalized
+            float eps = 0.1f;
+            float hxL = 0.0f, hxR = 0.0f, hzL = 0.0f, hzR = 0.0f;
+            
+            for (const auto& wave : waves) {
+                float frequency = (2.0f * M_PI) / wave.wavelength;
+                float phaseSpeed = wave.speed * frequency;
+                
+                // Sample height at (x-eps, z)
+                float phaseXL = (wave.direction.x * (x - eps) + wave.direction.y * z) * frequency 
+                              + time * phaseSpeed;
+                hxL += wave.amplitude * sin(phaseXL);
+                
+                // Sample height at (x+eps, z)
+                float phaseXR = (wave.direction.x * (x + eps) + wave.direction.y * z) * frequency 
+                              + time * phaseSpeed;
+                hxR += wave.amplitude * sin(phaseXR);
+                
+                // Sample height at (x, z-eps)
+                float phaseZL = (wave.direction.x * x + wave.direction.y * (z - eps)) * frequency 
+                              + time * phaseSpeed;
+                hzL += wave.amplitude * sin(phaseZL);
+                
+                // Sample height at (x, z+eps)
+                float phaseZR = (wave.direction.x * x + wave.direction.y * (z + eps)) * frequency 
+                              + time * phaseSpeed;
+                hzR += wave.amplitude * sin(phaseZR);
+            }
+            
+            // Compute normal from finite differences
+            // Normal ? (-?h/?x, 1, -?h/?z) = (hxL - hxR, 2*eps, hzL - hzR)
+            float nx = hxL - hxR;
+            float ny = 2.0f * eps;
+            float nz = hzL - hzR;
+            float nlen = sqrt(nx * nx + ny * ny + nz * nz);
+            if (nlen > 0.0001f) {
+                nx /= nlen;
+                ny /= nlen;
+                nz /= nlen;
+            }
+            
+            normals.push_back(nx);
+            normals.push_back(ny);
+            normals.push_back(nz);
+
+            // Texture coordinates
+            texcoords.push_back((float)i / N);
+            texcoords.push_back((float)j / N);
+
+            // Color based on wave height (blue-green gradient)
+            float green = glm::clamp(0.5f + y * 2.0f, 0.0f, 1.0f);
+            float blue = glm::clamp(0.6f + y * 3.0f, 0.0f, 1.0f);
+            colors.push_back(0.0f);     // R
+            colors.push_back(green);    // G
+            colors.push_back(blue);     // B
+        }
+    }
+
+    // === GENERATE INDICES FOR TRIANGLE MESH ===
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            int idx0 = i * (N + 1) + j;
+            int idx1 = idx0 + 1;
+            int idx2 = idx0 + (N + 1);
+            int idx3 = idx2 + 1;
+
+            // First triangle (counter-clockwise)
+            elements.push_back(idx0);
+            elements.push_back(idx2);
+            elements.push_back(idx1);
+
+            // Second triangle (counter-clockwise)
+            elements.push_back(idx1);
+            elements.push_back(idx2);
+            elements.push_back(idx3);
+        }
+    }
+
+	
 }
