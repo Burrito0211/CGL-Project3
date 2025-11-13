@@ -54,7 +54,6 @@
 static float startTime = std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
 
 #define M_PI 3.14159265359
-static std::time_t startTime = std::time(nullptr);
 
 void TrainView::setUBO() {
 	auto now = std::chrono::system_clock::now();
@@ -1344,49 +1343,21 @@ void TrainView::drawWave(float time) {
 }
 
 void TrainView::updateWater(float time, int N, float size) {
-	for (int j = 0; j <= N; ++j) {
-		for (int i = 0; i <= N; ++i) {
-			int index = (j * (N + 1) + i) * 3;
-			float x = (float)i / N * size - size * 0.5f;
-			float z = (float)j / N * size - size * 0.5f;
+	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
 
-			// === 動態波紋高度 ===
-			float h = 0.0f;
-			for (const auto& w : waves) {
-				float phase = glm::dot(w.direction, glm::vec2(x, z)) * w.frequency + w.speed * time;
-				h += w.amplitude * sin(phase);
-			}
-			vertices[index + 1] = h;
+    glm::mat4 view_matrix;
+    glGetFloatv(GL_MODELVIEW_MATRIX, &view_matrix[0][0]);
+    glm::mat4 projection_matrix;
+    glGetFloatv(GL_PROJECTION_MATRIX, &projection_matrix[0][0]);
 
-			// === 顏色根據高度調整 ===
-			float blue = 0.6f + h * 3.0f;
-			float green = 0.5f + h * 2.0f;
-			colors[index + 0] = 0.0f;
-			colors[index + 1] = glm::clamp(green, 0.0f, 1.0f);
-			colors[index + 2] = glm::clamp(blue, 0.0f, 1.0f);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), &projection_matrix[0][0]);
+    glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), &view_matrix[0][0]);
 
-			// === 簡易法線（利用微分近似） ===
-			float eps = 0.1f;
-			float hL = 0.0f, hR = 0.0f, hD = 0.0f, hU = 0.0f;
-			for (const auto& w : waves) {
-				hL += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x - eps, z)) * w.frequency + w.speed * time);
-				hR += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x + eps, z)) * w.frequency + w.speed * time);
-				hD += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x, z - eps)) * w.frequency + w.speed * time);
-				hU += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x, z + eps)) * w.frequency + w.speed * time);
-			}
-			glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
-			normals[index + 0] = normal.x;
-			normals[index + 1] = normal.y;
-			normals[index + 2] = normal.z;
-		}
-	}
+    // Time (std140 pad to 16 bytes)
+    float timeData[4] = { time, 0.0f, 0.0f, 0.0f };
+    glBufferSubData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), sizeof(timeData), timeData);
 
-	// === 更新到 GPU ===
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[0]);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
-
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[1]);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, normals.size() * sizeof(float), normals.data());
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[3]);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, colors.size() * sizeof(float), colors.data());
