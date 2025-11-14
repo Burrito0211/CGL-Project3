@@ -63,6 +63,7 @@ class TrainView : public Fl_Gl_Window
 		Shader* normalCastle = nullptr;
 		Shader* coloredCastle = nullptr;
 		Shader* wave = nullptr;
+		Shader* sineWaveShader = nullptr;
 		Texture2D* heightMap = nullptr;
 		Texture2D* texture = nullptr;
 		VAO* plane = nullptr;
@@ -124,6 +125,9 @@ class TrainView : public Fl_Gl_Window
 			float frequency;
 		};
 
+		void setWaveSine(float);
+		void updateSine(float);
+		void updateSin(float);
 		void updateWater(float time, int N, float size);
 		void setCastle();
 		void setColoredCastle();

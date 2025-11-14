@@ -12,7 +12,7 @@ uniform float u_time;
 
 uniform sampler2D u_heightmap;
 uniform float u_amp = 0.5;
-uniform float u_speed = 0.3;
+uniform float u_speed = 1;
 uniform vec2 u_texel;
 uniform float u_height_mult = 0.7;
 
