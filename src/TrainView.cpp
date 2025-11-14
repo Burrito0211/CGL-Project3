@@ -1214,7 +1214,7 @@ void TrainView::setWave(float time) {
 	const float waterSize = 5.0f;
 
 	if (!this->wave) {
-		this->wave = new Shader("./shaders/test.vert", nullptr, nullptr, nullptr, "./shaders/test.frag");
+		this->wave = new Shader("./shaders/height.vert", nullptr, nullptr, nullptr, "./shaders/height.frag");
 	}
 
 	if (!this->common_matrices) {

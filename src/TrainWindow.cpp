@@ -134,7 +134,8 @@ TrainWindow(const int x, const int y)
 		shaderBrowser->callback((Fl_Callback*)damageCB, this);
 		shaderBrowser->add("Regular Castle");
 		shaderBrowser->add("Colored Castle");
-		shaderBrowser->add("Wave");
+		shaderBrowser->add("Height Map Wave");
+		shaderBrowser->add("Sine Wave");
 		shaderBrowser->select(1);
 		
 		pty += 110;
