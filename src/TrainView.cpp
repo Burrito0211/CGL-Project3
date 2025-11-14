@@ -49,6 +49,7 @@
 #include "RenderUtilities/Texture.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <chrono>
 
  float TrainView::startTime = std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -56,7 +57,9 @@
 #define M_PI 3.14159265359
 
 float TrainView::getTime() {
-	return std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
+    static auto start = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration<float>(now - start).count();  // seconds as float
 }
 
 void TrainView::setUBO() {
@@ -223,7 +226,7 @@ void TrainView::draw()
 		else if(tw->shaderBrowser->value() == 2) {
 			setColoredCastle();
 		}else {
-			setWave(getTime() - startTime);
+			setWave(getTime());
 		}
 	}
 	else
@@ -490,7 +493,7 @@ void TrainView::drawStuff(bool doingShadows)
 	// draw the track
 	//####################################################################
 	if(tw->shaderBrowser->value() == 3 && tw->runButton->value() == true)
-		updateWater(getTime() - startTime, 100, 100.0f);
+		updateWater(getTime(), 100, 100.0f);
 
 	drawTrack(doingShadows);
 	drawSleepers(doingShadows);
@@ -1089,7 +1092,8 @@ void TrainView::setCastle() {
 		0, 1, 2,
 		0, 2, 3, };
 
-	this->plane = new VAO;
+	this->plane = new VAO();
+	*this->plane = {};
 	this->plane->element_amount = sizeof(element) / sizeof(GLuint);
 	glGenVertexArrays(1, &this->plane->vao);
 	glGenBuffers(3, this->plane->vbo);
@@ -1162,7 +1166,8 @@ void TrainView::setColoredCastle()  {
 	};
 
 
-	this->plane = new VAO;
+	this->plane = new VAO();
+	*this->plane = {};
 	this->plane->element_amount = sizeof(element) / sizeof(GLuint);
 	glGenVertexArrays(1, &this->plane->vao);
 	glGenBuffers(4, this->plane->vbo);
@@ -1205,275 +1210,286 @@ void TrainView::setColoredCastle()  {
 }
 
 void TrainView::setWave(float time) {
-	
-	this->wave = new Shader("./shaders/test.vert", nullptr, nullptr, nullptr, "./shaders/test.frag");
-	this->common_matrices = new UBO();
+	const int gridResolution = 100;
+	const float waterSize = 5.0f;
 
-	this->common_matrices->size = 2 * sizeof(glm::mat4) + sizeof(glm::vec4);
-	glGenBuffers(1, &this->common_matrices->ubo);
+	if (!this->wave) {
+		this->wave = new Shader("./shaders/test.vert", nullptr, nullptr, nullptr, "./shaders/test.frag");
+	}
+
+	if (!this->common_matrices) {
+		this->common_matrices = new UBO();
+		this->common_matrices->ubo = 0;
+		this->common_matrices->size = 0;
+	}
+
+	this->common_matrices->size = 2 * sizeof(glm::mat4);
+	if (this->common_matrices->ubo == 0) {
+		glGenBuffers(1, &this->common_matrices->ubo);
+	}
 	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
-	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, NULL, GL_STATIC_DRAW);
+	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, nullptr, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-	const int gridResolution = 100;      // Number of grid divisions
-    const float waterSize = 100.0f;      // Size of water surface
-    
-    for (int i = 0; i <= gridResolution; ++i) {
-        for (int j = 0; j <= gridResolution; ++j) {
-            float x = i * (waterSize / gridResolution) - waterSize / 2.0f;
-            float z = j * (waterSize / gridResolution) - waterSize / 2.0f;
+	if (!this->plane) {
+		this->plane = new VAO();
+		*this->plane = {};
+	}
 
-            // === CALCULATE HEIGHT USING SIN WAVE ===
-            // H(x,y,t) = £U(A_i ¡Ñ sin(D_i¡P(x,y) ¡Ñ w_i + t ¡Ñ £p_i))
-            float y = 0.0f;
+	if (this->plane->vao == 0) {
+		glGenVertexArrays(1, &this->plane->vao);
+	}
+	for (int i = 0; i < 4; ++i) {
+		if (this->plane->vbo[i] == 0) {
+			glGenBuffers(1, &this->plane->vbo[i]);
+		}
+	}
+	if (this->plane->ebo == 0) {
+		glGenBuffers(1, &this->plane->ebo);
+	}
 
-            // Store vertex position
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z);
-            
-            normals.push_back(0.0f);
-            normals.push_back(1.0f);
-            normals.push_back(0.0f);
+	vertices.clear();
+	normals.clear();
+	texcoords.clear();
+	colors.clear();
+	elements.clear();
 
-            // Texture coordinates
-            texcoords.push_back((float)i / gridResolution);
-            texcoords.push_back((float)j / gridResolution);
+	const size_t vertexCount = static_cast<size_t>((gridResolution + 1) * (gridResolution + 1));
+	vertices.reserve(vertexCount * 3);
+	normals.reserve(vertexCount * 3);
+	texcoords.reserve(vertexCount * 2);
+	colors.reserve(vertexCount * 3);
+	elements.reserve(static_cast<size_t>(gridResolution) * gridResolution * 6);
 
-            // Color based on wave height (blue-green gradient)
-            float green = glm::clamp(0.5f + y * 2.0f, 0.0f, 1.0f);
-            float blue = glm::clamp(0.6f + y * 3.0f, 0.0f, 1.0f);
-            colors.push_back(0.0f);     // R
-            colors.push_back(green);    // G
-            colors.push_back(blue);     // B
-        }
-    }
+	const float step = waterSize / static_cast<float>(gridResolution);
+	const float halfSize = waterSize * 0.5f;
 
-    // === GENERATE INDICES FOR TRIANGLE MESH ===
-    for (int i = 0; i < gridResolution; ++i) {
-        for (int j = 0; j < gridResolution; ++j) {
-            int idx0 = i * (gridResolution + 1) + j;
-            int idx1 = idx0 + 1;
-            int idx2 = idx0 + (gridResolution + 1);
-            int idx3 = idx2 + 1;
+	for (int j = 0; j <= gridResolution; ++j) {
+		for (int i = 0; i <= gridResolution; ++i) {
+			float x = i * step - halfSize;
+			float z = j * step - halfSize;
 
-            // First triangle (counter-clockwise)
-            elements.push_back(idx0);
-            elements.push_back(idx2);
-            elements.push_back(idx1);
+			vertices.push_back(x);
+			vertices.push_back(0.0f);
+			vertices.push_back(z);
 
-            // Second triangle (counter-clockwise)
-            elements.push_back(idx1);
-            elements.push_back(idx2);
-            elements.push_back(idx3);
-        }
-    }
+			normals.push_back(0.0f);
+			normals.push_back(1.0f);
+			normals.push_back(0.0f);
 
-	GLuint loc = glGetUniformLocation(this->wave->Program, "u_time");
-	glUniform1f(loc, time);
+			texcoords.push_back(static_cast<float>(i) / static_cast<float>(gridResolution));
+			texcoords.push_back(static_cast<float>(j) / static_cast<float>(gridResolution));
 
-	loc = glGetUniformLocation(this->wave->Program, "u_heightmap");
-	this->heightMap = new Texture2D("./images/wave.png");
-	this->heightMap->bind(1);
-	glUniform1i(loc, 1);
+			colors.push_back(0.0f);
+			colors.push_back(0.6f);
+			colors.push_back(1.0f);
+		}
+	}
 
-	loc = glGetUniformLocation(this->wave->Program, "u_texel");
-	glUniform2f(loc, 1.0f / heightMap->size.x, 1.0f / heightMap->size.y);
+	for (int j = 0; j < gridResolution; ++j) {
+		for (int i = 0; i < gridResolution; ++i) {
+			GLuint topLeft = static_cast<GLuint>(j * (gridResolution + 1) + i);
+			GLuint topRight = topLeft + 1;
+			GLuint bottomLeft = static_cast<GLuint>((j + 1) * (gridResolution + 1) + i);
+			GLuint bottomRight = bottomLeft + 1;
 
-    // Bind VAO
-    glBindVertexArray(plane->vao);
+			elements.push_back(topLeft);
+			elements.push_back(bottomLeft);
+			elements.push_back(topRight);
 
-    // === UPDATE VERTEX BUFFER (location = 0) ===
-    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[0]);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), 
-                 vertices.data(), GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(0);
+			elements.push_back(topRight);
+			elements.push_back(bottomLeft);
+			elements.push_back(bottomRight);
+		}
+	}
 
-    // === UPDATE NORMAL BUFFER (location = 1) ===
-    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[1]);
-    glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(float), 
-                 normals.data(), GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(1);
+	glBindVertexArray(this->plane->vao);
 
-    // === UPDATE TEXTURE COORDINATE BUFFER (location = 2) ===
-    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[2]);
-    glBufferData(GL_ARRAY_BUFFER, texcoords.size() * sizeof(float), 
-                 texcoords.data(), GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(2);
+	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[0]);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), vertices.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
+	glEnableVertexAttribArray(0);
 
-    // === UPDATE COLOR BUFFER (location = 3) ===
-    glBindBuffer(GL_ARRAY_BUFFER, plane->vbo[3]);
-    glBufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(float), 
-                 colors.data(), GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(3);
+	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[1]);
+	glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat), normals.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
+	glEnableVertexAttribArray(1);
 
-    // === UPDATE ELEMENT BUFFER ===
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, plane->ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(GLuint), 
-                 elements.data(), GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[2]);
+	glBufferData(GL_ARRAY_BUFFER, texcoords.size() * sizeof(GLfloat), texcoords.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 2), nullptr);
+	glEnableVertexAttribArray(2);
 
-    plane->element_amount = elements.size();
+	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[3]);
+	glBufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(GLfloat), colors.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
+	glEnableVertexAttribArray(3);
 
-   
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->plane->ebo);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(GLuint), elements.data(), GL_STATIC_DRAW);
 
+	this->plane->element_amount = static_cast<unsigned int>(elements.size());
+
+	glBindVertexArray(0);
+
+	if (!this->heightMap) {
+		this->heightMap = new Texture2D("./images/wave.png");
+	}
+
+	this->wave->Use();
+
+	if (this->heightMap) {
+		this->heightMap->bind(1);
+		GLint samplerLoc = glGetUniformLocation(this->wave->Program, "u_heightmap");
+		if (samplerLoc != -1) {
+			glUniform1i(samplerLoc, 1);
+		}
+		GLint texelLoc = glGetUniformLocation(this->wave->Program, "u_texel");
+		if (texelLoc != -1) {
+			glUniform2f(texelLoc,
+				1.0f / static_cast<float>(heightMap->size.x),
+				1.0f / static_cast<float>(heightMap->size.y));
+		}
+	}
+
+	GLint timeLoc = glGetUniformLocation(this->wave->Program, "u_time");
+	if (timeLoc != -1) {
+		glUniform1f(timeLoc, time);
+	}
+
+	glUseProgram(0);
 }
 
-void TrainView::updateWater(float time, int N, float size) {
-	vertices.clear();
-    normals.clear();
-    texcoords.clear();
-    colors.clear();
-    elements.clear();
+void TrainView::updateWater(float time, int, float) {
+	if (!this->wave) {
+		return;
+	}
 
-    float step = size / N;
+	this->wave->Use();
 
-    // Generate vertices for each grid point
-    for (int i = 0; i <= N; ++i) {
-        for (int j = 0; j <= N; ++j) {
-            float x = i * step - size / 2.0f;
-            float z = j * step - size / 2.0f;
+	if (this->heightMap) {
+		this->heightMap->bind(1);
+		GLint samplerLoc = glGetUniformLocation(this->wave->Program, "u_heightmap");
+		if (samplerLoc != -1) {
+			glUniform1i(samplerLoc, 1);
+		}
+		GLint texelLoc = glGetUniformLocation(this->wave->Program, "u_texel");
+		if (texelLoc != -1) {
+			glUniform2f(texelLoc,
+				1.0f / static_cast<float>(heightMap->size.x),
+				1.0f / static_cast<float>(heightMap->size.y));
+		}
+	}
 
-            // === CALCULATE HEIGHT USING SIN WAVE ===
-            // H(x,y,t) = £U(A_i ¡Ñ sin(D_i¡P(x,y) ¡Ñ w_i + t ¡Ñ £p_i))
-            float y = 0.0f;
-            for (const auto& wave : waves) {
-                // w = 2£k/L (frequency)
-                float frequency = (2.0f * M_PI) / wave.wavelength;
-                
-                // £p = S ¡Ñ 2£k/L (phase speed)
-                float phaseSpeed = wave.speed * frequency;
-                
-                // Phase: D¡P(x,z) ¡Ñ w + t ¡Ñ £p
-                float phase = (wave.direction.x * x + wave.direction.y * z) * frequency 
-                            + time * phaseSpeed;
-                
-                // Add wave contribution
-                y += wave.amplitude * sin(phase);
-            }
+	GLint timeLoc = glGetUniformLocation(this->wave->Program, "u_time");
+	if (timeLoc != -1) {
+		glUniform1f(timeLoc, time);
+	}
 
-            // Store vertex position
-            vertices.push_back(x);
-            vertices.push_back(y);
-            vertices.push_back(z);
-
-            // === CALCULATE NORMAL USING FINITE DIFFERENCES ===
-            // Normal = (?h/?x, 1, ?h/?z) normalized
-            float eps = 0.1f;
-            float hxL = 0.0f, hxR = 0.0f, hzL = 0.0f, hzR = 0.0f;
-            
-            for (const auto& wave : waves) {
-                float frequency = (2.0f * M_PI) / wave.wavelength;
-                float phaseSpeed = wave.speed * frequency;
-                
-                // Sample height at (x-eps, z)
-                float phaseXL = (wave.direction.x * (x - eps) + wave.direction.y * z) * frequency 
-                              + time * phaseSpeed;
-                hxL += wave.amplitude * sin(phaseXL);
-                
-                // Sample height at (x+eps, z)
-                float phaseXR = (wave.direction.x * (x + eps) + wave.direction.y * z) * frequency 
-                              + time * phaseSpeed;
-                hxR += wave.amplitude * sin(phaseXR);
-                
-                // Sample height at (x, z-eps)
-                float phaseZL = (wave.direction.x * x + wave.direction.y * (z - eps)) * frequency 
-                              + time * phaseSpeed;
-                hzL += wave.amplitude * sin(phaseZL);
-                
-                // Sample height at (x, z+eps)
-                float phaseZR = (wave.direction.x * x + wave.direction.y * (z + eps)) * frequency 
-                              + time * phaseSpeed;
-                hzR += wave.amplitude * sin(phaseZR);
-            }
-            
-            // Compute normal from finite differences
-            // Normal ? (-?h/?x, 1, -?h/?z) = (hxL - hxR, 2*eps, hzL - hzR)
-            float nx = hxL - hxR;
-            float ny = 2.0f * eps;
-            float nz = hzL - hzR;
-            float nlen = sqrt(nx * nx + ny * ny + nz * nz);
-            if (nlen > 0.0001f) {
-                nx /= nlen;
-                ny /= nlen;
-                nz /= nlen;
-            }
-            
-            normals.push_back(nx);
-            normals.push_back(ny);
-            normals.push_back(nz);
-
-            // Texture coordinates
-            texcoords.push_back((float)i / N);
-            texcoords.push_back((float)j / N);
-
-            // Color based on wave height (blue-green gradient)
-            float green = glm::clamp(0.5f + y * 2.0f, 0.0f, 1.0f);
-            float blue = glm::clamp(0.6f + y * 3.0f, 0.0f, 1.0f);
-            colors.push_back(0.0f);     // R
-            colors.push_back(green);    // G
-            colors.push_back(blue);     // B
-        }
-    }
-
-    // === GENERATE INDICES FOR TRIANGLE MESH ===
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            int idx0 = i * (N + 1) + j;
-            int idx1 = idx0 + 1;
-            int idx2 = idx0 + (N + 1);
-            int idx3 = idx2 + 1;
-
-            // First triangle (counter-clockwise)
-            elements.push_back(idx0);
-            elements.push_back(idx2);
-            elements.push_back(idx1);
-
-            // Second triangle (counter-clockwise)
-            elements.push_back(idx1);
-            elements.push_back(idx2);
-            elements.push_back(idx3);
-        }
-    }
+	glUseProgram(0);
 }
 
 void TrainView::useShader(int choice) {
-	if(choice == 1) {
+	switch (choice) {
+	case 1:
+		if (!normalCastle) {
+			setCastle();
+		}
 		currentShader = normalCastle;
-	} else if (choice == 2) {
+		break;
+	case 2:
+		if (!coloredCastle) {
+			setColoredCastle();
+		}
 		currentShader = coloredCastle;
-	} else if (choice == 3) {
+		break;
+	case 3:
+		if (!wave) {
+			setWave(getTime() - startTime);
+		}
 		currentShader = wave;
+		break;
+	default:
+		currentShader = nullptr;
+		break;
 	}
 
-	setUBO();
-	glBindBufferRange(
-		GL_UNIFORM_BUFFER, /*binding point*/0, this->common_matrices->ubo, 0, this->common_matrices->size);
+	if (!currentShader) {
+		return;
+	}
 
-	//bind shader
-	this->currentShader->Use();
+	if (this->common_matrices && this->common_matrices->ubo != 0 && this->common_matrices->size > 0) {
+		setUBO();
+		glBindBufferRange(GL_UNIFORM_BUFFER, 0, this->common_matrices->ubo, 0, this->common_matrices->size);
+	}
 
-	glm::mat4 model_matrix = glm::mat4();
-	model_matrix = glm::translate(model_matrix, glm::vec3(0, 10.0f, 0.0f));
-	model_matrix = glm::scale(model_matrix, glm::vec3(10.0f, 10.0f, 10.0f));
-	glUniformMatrix4fv(
-		glGetUniformLocation(this->currentShader->Program, "u_model"), 1, GL_FALSE, &model_matrix[0][0]);
-	glUniform3fv(
-		glGetUniformLocation(this->currentShader->Program, "u_color"),
-		1,
-		&glm::vec3(1.0f, 1.0f, 0.0f)[0]);
-	this->texture->bind(0);
-	glUniform1i(glGetUniformLocation(this->currentShader->Program, "u_texture"), 0);
-	//bind VAO
-	glBindVertexArray(this->plane->vao);
-	glDrawElements(GL_TRIANGLES, this->plane->element_amount, GL_UNSIGNED_INT, 0);
+	currentShader->Use();
 
-	//unbind VAO
-	glBindVertexArray(0);
+	glm::mat4 model_matrix(1.0f);
+	model_matrix = glm::translate(model_matrix, glm::vec3(0.0f, 10.0f, 0.0f));
+	model_matrix = glm::scale(model_matrix, glm::vec3(10.0f));
 
-	//unbind shader(switch to fixed pipeline)
+	auto setMatrixUniform = [&](const char* name, const glm::mat4& value) {
+		GLint loc = glGetUniformLocation(currentShader->Program, name);
+		if (loc != -1) {
+			glUniformMatrix4fv(loc, 1, GL_FALSE, &value[0][0]);
+		}
+	};
+
+	setMatrixUniform("u_model", model_matrix);
+	setMatrixUniform("model", model_matrix);
+
+	glm::mat4 view_matrix(1.0f);
+	glGetFloatv(GL_MODELVIEW_MATRIX, &view_matrix[0][0]);
+	glm::mat4 projection_matrix(1.0f);
+	glGetFloatv(GL_PROJECTION_MATRIX, &projection_matrix[0][0]);
+
+	setMatrixUniform("u_view", view_matrix);
+	setMatrixUniform("view_matrix", view_matrix);
+	setMatrixUniform("u_projection", projection_matrix);
+	setMatrixUniform("proj_matrix", projection_matrix);
+
+	glm::mat4 inverse_view = glm::inverse(view_matrix);
+	glm::vec3 cameraPos = glm::vec3(inverse_view[3]);
+	GLint cameraLoc = glGetUniformLocation(currentShader->Program, "u_cameraPos");
+	if (cameraLoc != -1) {
+		glUniform3fv(cameraLoc, 1, &cameraPos[0]);
+	}
+
+	if (currentShader == wave) {
+		if (heightMap) {
+			heightMap->bind(1);
+			GLint samplerLoc = glGetUniformLocation(currentShader->Program, "u_heightmap");
+			if (samplerLoc != -1) {
+				glUniform1i(samplerLoc, 1);
+			}
+			GLint texelLoc = glGetUniformLocation(currentShader->Program, "u_texel");
+			if (texelLoc != -1) {
+				glUniform2f(texelLoc,
+					1.0f / static_cast<float>(heightMap->size.x),
+					1.0f / static_cast<float>(heightMap->size.y));
+			}
+		}
+	} else {
+		if (texture) {
+			texture->bind(0);
+		}
+		GLint samplerLoc = glGetUniformLocation(currentShader->Program, "u_texture");
+		if (samplerLoc != -1 && texture) {
+			glUniform1i(samplerLoc, 0);
+		}
+		glm::vec3 tint(1.0f, 1.0f, 0.0f);
+		GLint colorLoc = glGetUniformLocation(currentShader->Program, "u_color");
+		if (colorLoc != -1) {
+			glUniform3fv(colorLoc, 1, &tint[0]);
+		}
+	}
+
+	if (this->plane && this->plane->element_amount > 0) {
+		glBindVertexArray(this->plane->vao);
+		glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(this->plane->element_amount), GL_UNSIGNED_INT, nullptr);
+		glBindVertexArray(0);
+	}
+
 	glUseProgram(0);
 }

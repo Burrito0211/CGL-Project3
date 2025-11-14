@@ -42,7 +42,12 @@ void main()
     float spec = pow(max(dot(N, H), 0.0), u_shininess);
     vec3 specular = spec * u_specularStrength * u_lightColor;
 
+
+    float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+    vec3 surfaceTint = mix(u_waterColor, vec3(0.6, 0.8, 1.0), clamp(fresnel * 0.4, 0.0, 1.0));
     vec3 color = ambient + diffuse + specular;
+    color = mix(color, surfaceTint, 0.25);
+    color = clamp(color, 0.0, 1.0);
 
     FragColor = vec4(color, 1.0);
 }
