@@ -19,16 +19,21 @@ uniform float u_height_mult = 0.7;
 out vec3 vs_worldpos;
 out vec3 vs_normal;
 
+vec2 wrapUV(vec2 uv)
+{
+	return uv - floor(uv);
+}
+
 float sampleHeight(vec2 uv)
 {
-	return texture(u_heightmap, uv).r;
+	return texture(u_heightmap, wrapUV(uv)).r;
 }
 
 void main()
 {
 	vec4 worldPos = u_model * vec4(aPos, 1.0);
 	vec2 flow = vec2(0.01, 0.05) * u_speed;
-	vec2 uv = clamp(aTexCoord * 0.9 + 0.05 + flow * u_time, 0.001, 0.999);
+	vec2 uv = aTexCoord * 0.9 + 0.05 + flow * u_time;
 
 	float hC = sampleHeight(uv);
 	float hL = sampleHeight(uv + vec2(-u_texel.x, 0.0));
