@@ -42,10 +42,11 @@ void main()
 	float hU = sampleHeight(uv + vec2(0.0,  u_texel.y));
 	float neighborAvg = (hL + hR + hD + hU) * 0.25;
 	float heightMapHeight = mix(hC, neighborAvg * u_height_mult, 0.35);
+	float centeredHeight = (heightMapHeight - 0.5) * 2.0;
 
 	float sinePhase = worldPos.x * 0.1 + u_time * 0.1;
 	float sineWave = sin(sinePhase) * 0.2;
-	float finalHeight = heightMapHeight * u_amp * 0.7 + sineWave * 0.3;
+	float finalHeight = centeredHeight * u_amp + sineWave * 0.3;
 	worldPos.y += finalHeight;
 
 	float texelX = max(u_texel.x, 1e-4);
@@ -54,7 +55,8 @@ void main()
 	float dHdy = (hU - hD) * 0.5 / texelY;
 	float modelScaleX = length(u_model[0].xyz);
 	float sineDerivativeX = 0.1 * cos(sinePhase) * modelScaleX * 0.3;
-	vec3 nModel = normalize(vec3(-(dHdx * u_amp + sineDerivativeX), 1.0, -(dHdy * u_amp)));
+	float heightDerivativeScale = u_amp * 2.0;
+	vec3 nModel = normalize(vec3(-(dHdx * heightDerivativeScale + sineDerivativeX), 1.0, -(dHdy * heightDerivativeScale)));
 	mat3 normalMatrix = transpose(inverse(mat3(u_model)));
 	vs_normal = normalize(normalMatrix * nModel);
 	vs_worldpos = worldPos.xyz;

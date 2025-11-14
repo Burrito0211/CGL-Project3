@@ -391,7 +391,7 @@ void TrainView::draw()
 		drawStuff(true);
 		unsetupShadows();
 	}
-
+	
 	useShader(tw->shaderBrowser->value());
 	
 }
@@ -1469,6 +1469,21 @@ void TrainView::useShader(int choice) {
 					1.0f / static_cast<float>(heightMap->size.x),
 					1.0f / static_cast<float>(heightMap->size.y));
 			}
+		}
+		const float waveAmplitude = 3.0f;
+		const float waveSpeed = 0.25f;
+		const float heightMix = 0.8f;
+		GLint ampLoc = glGetUniformLocation(currentShader->Program, "u_amp");
+		if (ampLoc != -1) {
+			glUniform1f(ampLoc, waveAmplitude);
+		}
+		GLint speedLoc = glGetUniformLocation(currentShader->Program, "u_speed");
+		if (speedLoc != -1) {
+			glUniform1f(speedLoc, waveSpeed);
+		}
+		GLint heightMultLoc = glGetUniformLocation(currentShader->Program, "u_height_mult");
+		if (heightMultLoc != -1) {
+			glUniform1f(heightMultLoc, heightMix);
 		}
 	} else {
 		if (texture) {
