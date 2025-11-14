@@ -59,12 +59,17 @@ class CTrack;
 class TrainView : public Fl_Gl_Window
 {
 	public:
-		Shader* shader = nullptr;
+		Shader* currentShader = nullptr;
+		Shader* normalCastle = nullptr;
+		Shader* coloredCastle = nullptr;
+		Shader* wave = nullptr;
+		Texture2D* heightMap = nullptr;
 		Texture2D* texture = nullptr;
 		VAO* plane = nullptr;
 		UBO* common_matrices = nullptr;
 		void setUBO();
 
+		float getTime();
 		void drawSleepers(bool);
 		// note that we keep the "standard widget" constructor arguments
 		TrainView(int x, int y, int w, int h, const char* l = 0);
@@ -120,9 +125,10 @@ class TrainView : public Fl_Gl_Window
 		};
 
 		void updateWater(float time, int N, float size);
-		void drawCastle();
-		void drawColoredCastle();
-		void drawWave(float);
+		void setCastle();
+		void setColoredCastle();
+		void setWave(float);
+		void useShader(int shaderChoice);
 		int currentSplineChoice() const;
 		SplineSample sampleSpline(float u, int splineChoice) const;
 		size_t wrapIndex(int idx, size_t count) const;
@@ -137,7 +143,7 @@ class TrainView : public Fl_Gl_Window
 		void bsplineWeights(float t, float weights[4]) const;
 		void bsplineDerivatives(float t, float deriv[4]) const;
 		std::vector<SplineSample> sleeperSamples;
-
+		static float startTime;
 	private:
 		std::vector<Wave> waves = {
 			{{1.0f, 0.0f}, 2.0f, 0.10f, 1.0f},
@@ -149,4 +155,5 @@ class TrainView : public Fl_Gl_Window
 		std::vector<GLfloat> texcoords;
 		std::vector<GLfloat> colors;
 		std::vector<GLuint> elements;
+		
 };

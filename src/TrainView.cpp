@@ -49,9 +49,18 @@
 #include "RenderUtilities/Texture.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
+#include <chrono>
+
+ float TrainView::startTime = std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
 
 #define M_PI 3.14159265359
-static std::time_t startTime = std::time(nullptr);
+
+float TrainView::getTime() {
+    static auto start = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration<float>(now - start).count();  // seconds as float
+}
 
 void TrainView::setUBO() {
 	float wdt = this->pixel_w();
@@ -213,11 +222,11 @@ void TrainView::draw()
 	if (gladLoadGL())
 	{
 		if(tw->shaderBrowser->value() == 1)
-			drawCastle();
+			setCastle();
 		else if(tw->shaderBrowser->value() == 2) {
-			drawColoredCastle();
+			setColoredCastle();
 		}else {
-			drawWave(startTime);
+			setWave(getTime());
 		}
 	}
 	else
@@ -382,35 +391,9 @@ void TrainView::draw()
 		drawStuff(true);
 		unsetupShadows();
 	}
-
-	setUBO();
-	glBindBufferRange(
-		GL_UNIFORM_BUFFER, /*binding point*/0, this->common_matrices->ubo, 0, this->common_matrices->size);
-
-	//bind shader
-	this->shader->Use();
-
-	glm::mat4 model_matrix = glm::mat4();
-	model_matrix = glm::translate(model_matrix, glm::vec3(0, 10.0f, 0.0f));
-	model_matrix = glm::scale(model_matrix, glm::vec3(10.0f, 10.0f, 10.0f));
-	glUniformMatrix4fv(
-		glGetUniformLocation(this->shader->Program, "u_model"), 1, GL_FALSE, &model_matrix[0][0]);
-	glUniform3fv(
-		glGetUniformLocation(this->shader->Program, "u_color"),
-		1,
-		&glm::vec3(1.0f, 1.0f, 0.0f)[0]);
-	this->texture->bind(0);
-	glUniform1i(glGetUniformLocation(this->shader->Program, "u_texture"), 0);
-
-	//bind VAO
-	glBindVertexArray(this->plane->vao);
-	glDrawElements(GL_TRIANGLES, this->plane->element_amount, GL_UNSIGNED_INT, 0);
-
-	//unbind VAO
-	glBindVertexArray(0);
-
-	//unbind shader(switch to fixed pipeline)
-	glUseProgram(0);
+	
+	useShader(tw->shaderBrowser->value());
+	
 }
 
 
@@ -505,12 +488,12 @@ void TrainView::drawStuff(bool doingShadows)
 					glColor3ub(240, 240, 30);
 			}
 			m_pTrack->points[i].draw();
-}
+		}
 	}
 	// draw the track
 	//####################################################################
-	if(tw->shaderBrowser->value() == 3)
-		updateWater(static_cast<float>(std::difftime(std::time(nullptr), startTime)), 100, 10.0f);
+	if(tw->shaderBrowser->value() == 3 && tw->runButton->value() == true)
+		updateWater(getTime(), 100, 100.0f);
 
 	drawTrack(doingShadows);
 	drawSleepers(doingShadows);
@@ -1076,8 +1059,8 @@ doPick()
 	printf("Selected Cube %d\n",selectedCube);
 }
 
-void TrainView::drawCastle() {
-	this->shader = new Shader("./shaders/simple.vert", nullptr, nullptr, nullptr, "./shaders/simple.frag");
+void TrainView::setCastle() {
+	this->normalCastle = new Shader("./shaders/simple.vert", nullptr, nullptr, nullptr, "./shaders/simple.frag");
 	this->common_matrices = new UBO();
 
 
@@ -1109,7 +1092,8 @@ void TrainView::drawCastle() {
 		0, 1, 2,
 		0, 2, 3, };
 
-	this->plane = new VAO;
+	this->plane = new VAO();
+	*this->plane = {};
 	this->plane->element_amount = sizeof(element) / sizeof(GLuint);
 	glGenVertexArrays(1, &this->plane->vao);
 	glGenBuffers(3, this->plane->vbo);
@@ -1145,8 +1129,8 @@ void TrainView::drawCastle() {
 	this->texture = new Texture2D("./images/church.png");
 }
 
-void TrainView::drawColoredCastle()  {
-	this->shader = new Shader("./shaders/colored.vert", nullptr, nullptr, nullptr, "./shaders/colored.frag");
+void TrainView::setColoredCastle()  {
+	this->coloredCastle = new Shader("./shaders/colored.vert", nullptr, nullptr, nullptr, "./shaders/colored.frag");
 	this->common_matrices = new UBO();
 
 	this->common_matrices->size = 2 * sizeof(glm::mat4);
@@ -1182,7 +1166,8 @@ void TrainView::drawColoredCastle()  {
 	};
 
 
-	this->plane = new VAO;
+	this->plane = new VAO();
+	*this->plane = {};
 	this->plane->element_amount = sizeof(element) / sizeof(GLuint);
 	glGenVertexArrays(1, &this->plane->vao);
 	glGenBuffers(4, this->plane->vbo);
@@ -1224,85 +1209,88 @@ void TrainView::drawColoredCastle()  {
 	this->texture = new Texture2D("./images/church.png");
 }
 
-void TrainView::drawWave(float time) {
-	
-	this->shader = new Shader("./shaders/temp.vert", nullptr, nullptr, nullptr, "./shaders/temp.frag");
-	this->common_matrices = new UBO();
+void TrainView::setWave(float time) {
+	const int gridResolution = 100;
+	const float waterSize = 5.0f;
+
+	if (!this->wave) {
+		this->wave = new Shader("./shaders/height.vert", nullptr, nullptr, nullptr, "./shaders/height.frag");
+	}
+
+	if (!this->common_matrices) {
+		this->common_matrices = new UBO();
+		this->common_matrices->ubo = 0;
+		this->common_matrices->size = 0;
+	}
 
 	this->common_matrices->size = 2 * sizeof(glm::mat4);
-	glGenBuffers(1, &this->common_matrices->ubo);
+	if (this->common_matrices->ubo == 0) {
+		glGenBuffers(1, &this->common_matrices->ubo);
+	}
 	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
-	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, NULL, GL_STATIC_DRAW);
+	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, nullptr, GL_DYNAMIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-	// ====== 參數設定 ======
-	const int N = 100;           // 網格細緻度（越大越平滑）
-	const float SIZE = 10.0f;    // 整體平面大小（10x10）
+	if (!this->plane) {
+		this->plane = new VAO();
+		*this->plane = {};
+	}
 
-	for (auto& w : waves)
-		w.frequency = 2.0f * M_PI / w.wavelength;
+	if (this->plane->vao == 0) {
+		glGenVertexArrays(1, &this->plane->vao);
+	}
+	for (int i = 0; i < 4; ++i) {
+		if (this->plane->vbo[i] == 0) {
+			glGenBuffers(1, &this->plane->vbo[i]);
+		}
+	}
+	if (this->plane->ebo == 0) {
+		glGenBuffers(1, &this->plane->ebo);
+	}
 
-	// ====== 產生頂點資料 ======
-	float half = SIZE / 2.0f;
+	vertices.clear();
+	normals.clear();
+	texcoords.clear();
+	colors.clear();
+	elements.clear();
 
-	for (int j = 0; j <= N; ++j) {
-		for (int i = 0; i <= N; ++i) {
-			std::time_t now = std::time(nullptr);           
-			float currentTime =  static_cast<float>(std::difftime(now, startTime));
-			float x = (float)i / N * SIZE - SIZE * 0.5f;
-			float z = (float)j / N * SIZE - SIZE * 0.5f;
+	const size_t vertexCount = static_cast<size_t>((gridResolution + 1) * (gridResolution + 1));
+	vertices.reserve(vertexCount * 3);
+	normals.reserve(vertexCount * 3);
+	texcoords.reserve(vertexCount * 2);
+	colors.reserve(vertexCount * 3);
+	elements.reserve(static_cast<size_t>(gridResolution) * gridResolution * 6);
 
-			// ====== 計算動態波紋高度 ======
-			float h = 0.0f;
-			for (const auto& w : waves) {
-				float phase = glm::dot(w.direction, glm::vec2(x, z)) * w.frequency + w.speed * currentTime;
-				h += w.amplitude * sin(phase);
-			}
+	const float step = waterSize / static_cast<float>(gridResolution);
+	const float halfSize = waterSize * 0.5f;
 
-			// 頂點位置
+	for (int j = 0; j <= gridResolution; ++j) {
+		for (int i = 0; i <= gridResolution; ++i) {
+			float x = i * step - halfSize;
+			float z = j * step - halfSize;
+
 			vertices.push_back(x);
-			vertices.push_back(h);
+			vertices.push_back(0.0f);
 			vertices.push_back(z);
 
-			// ====== 法線計算 (簡化：利用微分近似) ======
-			float eps = 0.1f;
-			float hL = 0.0f, hR = 0.0f, hD = 0.0f, hU = 0.0f;
+			normals.push_back(0.0f);
+			normals.push_back(1.0f);
+			normals.push_back(0.0f);
 
-			for (const auto& w : waves) {
-				float phaseL = glm::dot(w.direction, glm::vec2(x - eps, z)) * w.frequency + w.speed * time;
-				float phaseR = glm::dot(w.direction, glm::vec2(x + eps, z)) * w.frequency + w.speed * time;
-				float phaseD = glm::dot(w.direction, glm::vec2(x, z - eps)) * w.frequency + w.speed * time;
-				float phaseU = glm::dot(w.direction, glm::vec2(x, z + eps)) * w.frequency + w.speed * time;
-				hL += w.amplitude * sin(phaseL);
-				hR += w.amplitude * sin(phaseR);
-				hD += w.amplitude * sin(phaseD);
-				hU += w.amplitude * sin(phaseU);
-			}
+			texcoords.push_back(static_cast<float>(i) / static_cast<float>(gridResolution));
+			texcoords.push_back(static_cast<float>(j) / static_cast<float>(gridResolution));
 
-			glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
-			normals.push_back(normal.x);
-			normals.push_back(normal.y);
-			normals.push_back(normal.z);
-
-			// 貼圖座標
-			texcoords.push_back((float)i / N);
-			texcoords.push_back((float)j / N);
-
-			// 顏色 — 隨高度微微改變
-			float blue = 0.6f + h * 3.0f;
-			float green = 0.5f + h * 2.0f;
 			colors.push_back(0.0f);
-			colors.push_back(glm::clamp(green, 0.0f, 1.0f));
-			colors.push_back(glm::clamp(blue, 0.0f, 1.0f));
+			colors.push_back(0.6f);
+			colors.push_back(1.0f);
 		}
 	}
 
-	// ====== 產生索引資料 ======
-	for (int j = 0; j < N; ++j) {
-		for (int i = 0; i < N; ++i) {
-			GLuint topLeft = j * (N + 1) + i;
+	for (int j = 0; j < gridResolution; ++j) {
+		for (int i = 0; i < gridResolution; ++i) {
+			GLuint topLeft = static_cast<GLuint>(j * (gridResolution + 1) + i);
 			GLuint topRight = topLeft + 1;
-			GLuint bottomLeft = (j + 1) * (N + 1) + i;
+			GLuint bottomLeft = static_cast<GLuint>((j + 1) * (gridResolution + 1) + i);
 			GLuint bottomRight = bottomLeft + 1;
 
 			elements.push_back(topLeft);
@@ -1315,99 +1303,208 @@ void TrainView::drawWave(float time) {
 		}
 	}
 
-	// ====== 建立 VAO / VBO ======
-	this->plane = new VAO();
-	this->plane->element_amount = elements.size();
-
-	glGenVertexArrays(1, &this->plane->vao);
-	glGenBuffers(4, this->plane->vbo);
-	glGenBuffers(1, &this->plane->ebo);
-
 	glBindVertexArray(this->plane->vao);
 
-	// 頂點位置
 	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[0]);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat),
-		vertices.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), vertices.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
 	glEnableVertexAttribArray(0);
 
-	// 法線
 	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[1]);
-	glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat),
-		normals.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+	glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat), normals.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
 	glEnableVertexAttribArray(1);
 
-	// 貼圖座標
 	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[2]);
-	glBufferData(GL_ARRAY_BUFFER, texcoords.size() * sizeof(GLfloat),
-		texcoords.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (GLvoid*)0);
+	glBufferData(GL_ARRAY_BUFFER, texcoords.size() * sizeof(GLfloat), texcoords.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 2), nullptr);
 	glEnableVertexAttribArray(2);
 
-	// 顏色
 	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[3]);
-	glBufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(GLfloat),
-		colors.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+	glBufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(GLfloat), colors.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
 	glEnableVertexAttribArray(3);
 
-	// 索引
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->plane->ebo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(GLuint),
-		elements.data(), GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(GLuint), elements.data(), GL_STATIC_DRAW);
 
-	// 解除綁定
+	this->plane->element_amount = static_cast<unsigned int>(elements.size());
+
 	glBindVertexArray(0);
 
-}
+	if (!this->heightMap) {
+		this->heightMap = new Texture2D("./images/wave.png");
+	}
 
-void TrainView::updateWater(float time, int N, float size) {
-	for (int j = 0; j <= N; ++j) {
-		for (int i = 0; i <= N; ++i) {
-			int index = (j * (N + 1) + i) * 3;
-			float x = (float)i / N * size - size * 0.5f;
-			float z = (float)j / N * size - size * 0.5f;
+	this->wave->Use();
 
-			// === 動態波紋高度 ===
-			float h = 0.0f;
-			for (const auto& w : waves) {
-				float phase = glm::dot(w.direction, glm::vec2(x, z)) * w.frequency + w.speed * time;
-				h += w.amplitude * sin(phase);
-			}
-			vertices[index + 1] = h;
-
-			// === 顏色根據高度調整 ===
-			float blue = 0.6f + h * 3.0f;
-			float green = 0.5f + h * 2.0f;
-			colors[index + 0] = 0.0f;
-			colors[index + 1] = glm::clamp(green, 0.0f, 1.0f);
-			colors[index + 2] = glm::clamp(blue, 0.0f, 1.0f);
-
-			// === 簡易法線（利用微分近似） ===
-			float eps = 0.1f;
-			float hL = 0.0f, hR = 0.0f, hD = 0.0f, hU = 0.0f;
-			for (const auto& w : waves) {
-				hL += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x - eps, z)) * w.frequency + w.speed * time);
-				hR += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x + eps, z)) * w.frequency + w.speed * time);
-				hD += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x, z - eps)) * w.frequency + w.speed * time);
-				hU += w.amplitude * sin(glm::dot(w.direction, glm::vec2(x, z + eps)) * w.frequency + w.speed * time);
-			}
-			glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
-			normals[index + 0] = normal.x;
-			normals[index + 1] = normal.y;
-			normals[index + 2] = normal.z;
+	if (this->heightMap) {
+		this->heightMap->bind(1);
+		GLint samplerLoc = glGetUniformLocation(this->wave->Program, "u_heightmap");
+		if (samplerLoc != -1) {
+			glUniform1i(samplerLoc, 1);
+		}
+		GLint texelLoc = glGetUniformLocation(this->wave->Program, "u_texel");
+		if (texelLoc != -1) {
+			glUniform2f(texelLoc,
+				1.0f / static_cast<float>(heightMap->size.x),
+				1.0f / static_cast<float>(heightMap->size.y));
 		}
 	}
 
-	// === 更新到 GPU ===
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[0]);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
+	GLint timeLoc = glGetUniformLocation(this->wave->Program, "u_time");
+	if (timeLoc != -1) {
+		glUniform1f(timeLoc, time);
+	}
 
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[1]);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, normals.size() * sizeof(float), normals.data());
+	glUseProgram(0);
+}
 
-	glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[3]);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, colors.size() * sizeof(float), colors.data());
+void TrainView::updateWater(float time, int, float) {
+	if (!this->wave) {
+		return;
+	}
+
+	this->wave->Use();
+
+	if (this->heightMap) {
+		this->heightMap->bind(1);
+		GLint samplerLoc = glGetUniformLocation(this->wave->Program, "u_heightmap");
+		if (samplerLoc != -1) {
+			glUniform1i(samplerLoc, 1);
+		}
+		GLint texelLoc = glGetUniformLocation(this->wave->Program, "u_texel");
+		if (texelLoc != -1) {
+			glUniform2f(texelLoc,
+				1.0f / static_cast<float>(heightMap->size.x),
+				1.0f / static_cast<float>(heightMap->size.y));
+		}
+	}
+
+	GLint timeLoc = glGetUniformLocation(this->wave->Program, "u_time");
+	if (timeLoc != -1) {
+		glUniform1f(timeLoc, time);
+	}
+
+	glUseProgram(0);
+}
+
+void TrainView::useShader(int choice) {
+	switch (choice) {
+	case 1:
+		if (!normalCastle) {
+			setCastle();
+		}
+		currentShader = normalCastle;
+		break;
+	case 2:
+		if (!coloredCastle) {
+			setColoredCastle();
+		}
+		currentShader = coloredCastle;
+		break;
+	case 3:
+		if (!wave) {
+			setWave(getTime() - startTime);
+		}
+		currentShader = wave;
+		break;
+	default:
+		currentShader = nullptr;
+		break;
+	}
+
+	if (!currentShader) {
+		return;
+	}
+
+	if (this->common_matrices && this->common_matrices->ubo != 0 && this->common_matrices->size > 0) {
+		setUBO();
+		glBindBufferRange(GL_UNIFORM_BUFFER, 0, this->common_matrices->ubo, 0, this->common_matrices->size);
+	}
+
+	currentShader->Use();
+
+	glm::mat4 model_matrix(1.0f);
+	model_matrix = glm::translate(model_matrix, glm::vec3(0.0f, 10.0f, 0.0f));
+	model_matrix = glm::scale(model_matrix, glm::vec3(10.0f));
+
+	auto setMatrixUniform = [&](const char* name, const glm::mat4& value) {
+		GLint loc = glGetUniformLocation(currentShader->Program, name);
+		if (loc != -1) {
+			glUniformMatrix4fv(loc, 1, GL_FALSE, &value[0][0]);
+		}
+	};
+
+	setMatrixUniform("u_model", model_matrix);
+	setMatrixUniform("model", model_matrix);
+
+	glm::mat4 view_matrix(1.0f);
+	glGetFloatv(GL_MODELVIEW_MATRIX, &view_matrix[0][0]);
+	glm::mat4 projection_matrix(1.0f);
+	glGetFloatv(GL_PROJECTION_MATRIX, &projection_matrix[0][0]);
+
+	setMatrixUniform("u_view", view_matrix);
+	setMatrixUniform("view_matrix", view_matrix);
+	setMatrixUniform("u_projection", projection_matrix);
+	setMatrixUniform("proj_matrix", projection_matrix);
+
+	glm::mat4 inverse_view = glm::inverse(view_matrix);
+	glm::vec3 cameraPos = glm::vec3(inverse_view[3]);
+	GLint cameraLoc = glGetUniformLocation(currentShader->Program, "u_cameraPos");
+	if (cameraLoc != -1) {
+		glUniform3fv(cameraLoc, 1, &cameraPos[0]);
+	}
+
+	if (currentShader == wave) {
+		if (heightMap) {
+			heightMap->bind(1);
+			GLint samplerLoc = glGetUniformLocation(currentShader->Program, "u_heightmap");
+			if (samplerLoc != -1) {
+				glUniform1i(samplerLoc, 1);
+			}
+			GLint texelLoc = glGetUniformLocation(currentShader->Program, "u_texel");
+			if (texelLoc != -1) {
+				glUniform2f(texelLoc,
+					1.0f / static_cast<float>(heightMap->size.x),
+					1.0f / static_cast<float>(heightMap->size.y));
+			}
+		}
+		const float waveAmplitude = 3.0f;
+		const float waveSpeed = 0.25f;
+		const float heightMix = 0.8f;
+		GLint ampLoc = glGetUniformLocation(currentShader->Program, "u_amp");
+		if (ampLoc != -1) {
+			glUniform1f(ampLoc, waveAmplitude);
+		}
+		GLint speedLoc = glGetUniformLocation(currentShader->Program, "u_speed");
+		if (speedLoc != -1) {
+			glUniform1f(speedLoc, waveSpeed);
+		}
+		GLint heightMultLoc = glGetUniformLocation(currentShader->Program, "u_height_mult");
+		if (heightMultLoc != -1) {
+			glUniform1f(heightMultLoc, heightMix);
+		}
+	} else {
+		if (texture) {
+			texture->bind(0);
+		}
+		GLint samplerLoc = glGetUniformLocation(currentShader->Program, "u_texture");
+		if (samplerLoc != -1 && texture) {
+			glUniform1i(samplerLoc, 0);
+		}
+		glm::vec3 tint(1.0f, 1.0f, 0.0f);
+		GLint colorLoc = glGetUniformLocation(currentShader->Program, "u_color");
+		if (colorLoc != -1) {
+			glUniform3fv(colorLoc, 1, &tint[0]);
+		}
+	}
+
+	if (this->plane && this->plane->element_amount > 0) {
+		glBindVertexArray(this->plane->vao);
+		glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(this->plane->element_amount), GL_UNSIGNED_INT, nullptr);
+		glBindVertexArray(0);
+	}
+
+	glUseProgram(0);
 }
