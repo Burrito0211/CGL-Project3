@@ -51,14 +51,15 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <chrono>
 
-static float startTime = std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
+ float TrainView::startTime = std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
 
 #define M_PI 3.14159265359
 
+float TrainView::getTime() {
+	return std::chrono::duration<float>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 void TrainView::setUBO() {
-	auto now = std::chrono::system_clock::now();
-	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-	float currentTime = ms / 1000.0f - startTime;
 	float wdt = this->pixel_w();
 	float hgt = this->pixel_h();
 
@@ -71,12 +72,6 @@ void TrainView::setUBO() {
 	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
 	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(glm::mat4), &projection_matrix[0][0]);
 	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(glm::mat4), sizeof(glm::mat4), &view_matrix[0][0]);
-
-	if(tw->shaderBrowser->value() == 3) {
-		float timeData[4] = { currentTime, 0.0f, 0.0f, 0.0f };
-		glBufferSubData(GL_UNIFORM_BUFFER, 2 * sizeof(glm::mat4), sizeof(timeData), timeData);
-	}
-
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
@@ -224,11 +219,11 @@ void TrainView::draw()
 	if (gladLoadGL())
 	{
 		if(tw->shaderBrowser->value() == 1)
-			drawCastle();
+			setCastle();
 		else if(tw->shaderBrowser->value() == 2) {
-			drawColoredCastle();
+			setColoredCastle();
 		}else {
-			drawWave(startTime);
+			setWave(getTime() - startTime);
 		}
 	}
 	else
@@ -394,34 +389,8 @@ void TrainView::draw()
 		unsetupShadows();
 	}
 
-	setUBO();
-	glBindBufferRange(
-		GL_UNIFORM_BUFFER, /*binding point*/0, this->common_matrices->ubo, 0, this->common_matrices->size);
-
-	//bind shader
-	this->shader->Use();
-
-	glm::mat4 model_matrix = glm::mat4();
-	model_matrix = glm::translate(model_matrix, glm::vec3(0, 10.0f, 0.0f));
-	model_matrix = glm::scale(model_matrix, glm::vec3(10.0f, 10.0f, 10.0f));
-	glUniformMatrix4fv(
-		glGetUniformLocation(this->shader->Program, "u_model"), 1, GL_FALSE, &model_matrix[0][0]);
-	glUniform3fv(
-		glGetUniformLocation(this->shader->Program, "u_color"),
-		1,
-		&glm::vec3(1.0f, 1.0f, 0.0f)[0]);
-	this->texture->bind(0);
-	glUniform1i(glGetUniformLocation(this->shader->Program, "u_texture"), 0);
-
-	//bind VAO
-	glBindVertexArray(this->plane->vao);
-	glDrawElements(GL_TRIANGLES, this->plane->element_amount, GL_UNSIGNED_INT, 0);
-
-	//unbind VAO
-	glBindVertexArray(0);
-
-	//unbind shader(switch to fixed pipeline)
-	glUseProgram(0);
+	useShader(tw->shaderBrowser->value());
+	
 }
 
 
@@ -521,7 +490,7 @@ void TrainView::drawStuff(bool doingShadows)
 	// draw the track
 	//####################################################################
 	if(tw->shaderBrowser->value() == 3 && tw->runButton->value() == true)
-		updateWater(static_cast<float>(std::difftime(std::time(nullptr), startTime)), 100, 10.0f);
+		updateWater(getTime() - startTime, 100, 100.0f);
 
 	drawTrack(doingShadows);
 	drawSleepers(doingShadows);
@@ -1087,8 +1056,8 @@ doPick()
 	printf("Selected Cube %d\n",selectedCube);
 }
 
-void TrainView::drawCastle() {
-	this->shader = new Shader("./shaders/simple.vert", nullptr, nullptr, nullptr, "./shaders/simple.frag");
+void TrainView::setCastle() {
+	this->normalCastle = new Shader("./shaders/simple.vert", nullptr, nullptr, nullptr, "./shaders/simple.frag");
 	this->common_matrices = new UBO();
 
 
@@ -1156,8 +1125,8 @@ void TrainView::drawCastle() {
 	this->texture = new Texture2D("./images/church.png");
 }
 
-void TrainView::drawColoredCastle()  {
-	this->shader = new Shader("./shaders/colored.vert", nullptr, nullptr, nullptr, "./shaders/colored.frag");
+void TrainView::setColoredCastle()  {
+	this->coloredCastle = new Shader("./shaders/colored.vert", nullptr, nullptr, nullptr, "./shaders/colored.frag");
 	this->common_matrices = new UBO();
 
 	this->common_matrices->size = 2 * sizeof(glm::mat4);
@@ -1235,9 +1204,9 @@ void TrainView::drawColoredCastle()  {
 	this->texture = new Texture2D("./images/church.png");
 }
 
-void TrainView::drawWave(float time) {
+void TrainView::setWave(float time) {
 	
-	this->shader = new Shader("./shaders/wave.vert", nullptr, nullptr, nullptr, "./shaders/wave.frag");
+	this->wave = new Shader("./shaders/test.vert", nullptr, nullptr, nullptr, "./shaders/test.frag");
 	this->common_matrices = new UBO();
 
 	this->common_matrices->size = 2 * sizeof(glm::mat4) + sizeof(glm::vec4);
@@ -1246,11 +1215,70 @@ void TrainView::drawWave(float time) {
 	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, NULL, GL_STATIC_DRAW);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-	const int gridResolution = 10;      // Number of grid divisions
-    const float waterSize = 10.0f;      // Size of water surface
+	const int gridResolution = 100;      // Number of grid divisions
+    const float waterSize = 100.0f;      // Size of water surface
     
-    // Update wave geometry with current time
-    updateWater(time, gridResolution, waterSize);
+    for (int i = 0; i <= gridResolution; ++i) {
+        for (int j = 0; j <= gridResolution; ++j) {
+            float x = i * (waterSize / gridResolution) - waterSize / 2.0f;
+            float z = j * (waterSize / gridResolution) - waterSize / 2.0f;
+
+            // === CALCULATE HEIGHT USING SIN WAVE ===
+            // H(x,y,t) = £U(A_i ¡Ñ sin(D_i¡P(x,y) ¡Ñ w_i + t ¡Ñ £p_i))
+            float y = 0.0f;
+
+            // Store vertex position
+            vertices.push_back(x);
+            vertices.push_back(y);
+            vertices.push_back(z);
+            
+            normals.push_back(0.0f);
+            normals.push_back(1.0f);
+            normals.push_back(0.0f);
+
+            // Texture coordinates
+            texcoords.push_back((float)i / gridResolution);
+            texcoords.push_back((float)j / gridResolution);
+
+            // Color based on wave height (blue-green gradient)
+            float green = glm::clamp(0.5f + y * 2.0f, 0.0f, 1.0f);
+            float blue = glm::clamp(0.6f + y * 3.0f, 0.0f, 1.0f);
+            colors.push_back(0.0f);     // R
+            colors.push_back(green);    // G
+            colors.push_back(blue);     // B
+        }
+    }
+
+    // === GENERATE INDICES FOR TRIANGLE MESH ===
+    for (int i = 0; i < gridResolution; ++i) {
+        for (int j = 0; j < gridResolution; ++j) {
+            int idx0 = i * (gridResolution + 1) + j;
+            int idx1 = idx0 + 1;
+            int idx2 = idx0 + (gridResolution + 1);
+            int idx3 = idx2 + 1;
+
+            // First triangle (counter-clockwise)
+            elements.push_back(idx0);
+            elements.push_back(idx2);
+            elements.push_back(idx1);
+
+            // Second triangle (counter-clockwise)
+            elements.push_back(idx1);
+            elements.push_back(idx2);
+            elements.push_back(idx3);
+        }
+    }
+
+	GLuint loc = glGetUniformLocation(this->wave->Program, "u_time");
+	glUniform1f(loc, time);
+
+	loc = glGetUniformLocation(this->wave->Program, "u_heightmap");
+	this->heightMap = new Texture2D("./images/wave.png");
+	this->heightMap->bind(1);
+	glUniform1i(loc, 1);
+
+	loc = glGetUniformLocation(this->wave->Program, "u_texel");
+	glUniform2f(loc, 1.0f / heightMap->size.x, 1.0f / heightMap->size.y);
 
     // Bind VAO
     glBindVertexArray(plane->vao);
@@ -1290,26 +1318,7 @@ void TrainView::drawWave(float time) {
 
     plane->element_amount = elements.size();
 
-    // === SET SHADER AND UNIFORMS ===
-    shader->Use();
-    
-    // Model matrix (identity - water at origin)
-    glm::mat4 model = glm::mat4(1.0f);
-    glUniformMatrix4fv(glGetUniformLocation(shader->Program, "u_model"), 
-                       1, GL_FALSE, glm::value_ptr(model));
-    
-    // Optional: Set lighting parameters in fragment shader
-    glUniform3f(glGetUniformLocation(shader->Program, "lightPosition"), 
-                50.0f, 100.0f, 50.0f);
-    glUniform3f(glGetUniformLocation(shader->Program, "viewPosition"), 
-                0.0f, 50.0f, 100.0f);
-    
-    // === DRAW THE WAVE ===
-    glDrawElements(GL_TRIANGLES, plane->element_amount, GL_UNSIGNED_INT, 0);
-    
-    // Unbind
-    glBindVertexArray(0);
-	this->texture = new Texture2D("./images/wave.png");
+   
 
 }
 
@@ -1429,6 +1438,42 @@ void TrainView::updateWater(float time, int N, float size) {
             elements.push_back(idx3);
         }
     }
+}
 
-	
+void TrainView::useShader(int choice) {
+	if(choice == 1) {
+		currentShader = normalCastle;
+	} else if (choice == 2) {
+		currentShader = coloredCastle;
+	} else if (choice == 3) {
+		currentShader = wave;
+	}
+
+	setUBO();
+	glBindBufferRange(
+		GL_UNIFORM_BUFFER, /*binding point*/0, this->common_matrices->ubo, 0, this->common_matrices->size);
+
+	//bind shader
+	this->currentShader->Use();
+
+	glm::mat4 model_matrix = glm::mat4();
+	model_matrix = glm::translate(model_matrix, glm::vec3(0, 10.0f, 0.0f));
+	model_matrix = glm::scale(model_matrix, glm::vec3(10.0f, 10.0f, 10.0f));
+	glUniformMatrix4fv(
+		glGetUniformLocation(this->currentShader->Program, "u_model"), 1, GL_FALSE, &model_matrix[0][0]);
+	glUniform3fv(
+		glGetUniformLocation(this->currentShader->Program, "u_color"),
+		1,
+		&glm::vec3(1.0f, 1.0f, 0.0f)[0]);
+	this->texture->bind(0);
+	glUniform1i(glGetUniformLocation(this->currentShader->Program, "u_texture"), 0);
+	//bind VAO
+	glBindVertexArray(this->plane->vao);
+	glDrawElements(GL_TRIANGLES, this->plane->element_amount, GL_UNSIGNED_INT, 0);
+
+	//unbind VAO
+	glBindVertexArray(0);
+
+	//unbind shader(switch to fixed pipeline)
+	glUseProgram(0);
 }
