@@ -221,12 +221,17 @@ void TrainView::draw()
 	
 	if (gladLoadGL())
 	{
-		if(tw->shaderBrowser->value() == 1)
+		int shaderChoice = tw->shaderBrowser->value();
+		if(shaderChoice == 1)
 			setCastle();
-		else if(tw->shaderBrowser->value() == 2) {
+		else if(shaderChoice == 2) {
 			setColoredCastle();
-		}else {
+		}
+		else if (shaderChoice == 3) {
 			setWave(getTime());
+		}
+		else if (shaderChoice == 4) {
+			setWaveSine(getTime());
 		}
 	}
 	else
@@ -492,8 +497,11 @@ void TrainView::drawStuff(bool doingShadows)
 	}
 	// draw the track
 	//####################################################################
-	if(tw->shaderBrowser->value() == 3 && tw->runButton->value() == true)
+	int shaderChoice = tw->shaderBrowser->value();
+	if(shaderChoice == 3 && tw->runButton->value() == true)
 		updateWater(getTime(), 100, 100.0f);
+	else if (shaderChoice == 4 && tw->runButton->value() == true)
+		updateSine(getTime());
 
 	drawTrack(doingShadows);
 	drawSleepers(doingShadows);
@@ -1211,7 +1219,7 @@ void TrainView::setColoredCastle()  {
 
 void TrainView::setWave(float time) {
 	const int gridResolution = 100;
-	const float waterSize = 5.0f;
+	const float waterSize = 5.5f;
 
 	if (!this->wave) {
 		this->wave = new Shader("./shaders/height.vert", nullptr, nullptr, nullptr, "./shaders/height.frag");
@@ -1409,6 +1417,12 @@ void TrainView::useShader(int choice) {
 		}
 		currentShader = wave;
 		break;
+	case 4:
+		if (!sineWaveShader) {
+			setWaveSine(getTime());
+		}
+		currentShader = sineWaveShader;
+		break;
 	default:
 		currentShader = nullptr;
 		break;
@@ -1427,7 +1441,9 @@ void TrainView::useShader(int choice) {
 
 	glm::mat4 model_matrix(1.0f);
 	model_matrix = glm::translate(model_matrix, glm::vec3(0.0f, 10.0f, 0.0f));
-	model_matrix = glm::scale(model_matrix, glm::vec3(10.0f));
+	float uniformScale = 10.0f;
+	model_matrix = glm::scale(model_matrix, glm::vec3(uniformScale));
+
 
 	auto setMatrixUniform = [&](const char* name, const glm::mat4& value) {
 		GLint loc = glGetUniformLocation(currentShader->Program, name);
@@ -1485,6 +1501,12 @@ void TrainView::useShader(int choice) {
 		if (heightMultLoc != -1) {
 			glUniform1f(heightMultLoc, heightMix);
 		}
+	} else if (currentShader == sineWaveShader) {
+		const float tempAmplitude = 2.0f;
+		GLint ampLoc = glGetUniformLocation(currentShader->Program, "u_amplitude");
+		if (ampLoc != -1) {
+			glUniform1f(ampLoc, tempAmplitude);
+		}
 	} else {
 		if (texture) {
 			texture->bind(0);
@@ -1507,4 +1529,156 @@ void TrainView::useShader(int choice) {
 	}
 
 	glUseProgram(0);
+}
+
+void TrainView::setWaveSine(float time) {
+	const int gridResolution = 100;
+	const float waterSize = 4.5f;
+	const unsigned int expectedElements = static_cast<unsigned int>(gridResolution) * static_cast<unsigned int>(gridResolution) * 6u;
+
+	if (!sineWaveShader) {
+		sineWaveShader = new Shader("./shaders/sine.vert", nullptr, nullptr, nullptr, "./shaders/sine.frag");
+	}
+
+	if (!this->common_matrices) {
+		this->common_matrices = new UBO();
+		this->common_matrices->ubo = 0;
+		this->common_matrices->size = 0;
+	}
+
+	this->common_matrices->size = 2 * sizeof(glm::mat4);
+	if (this->common_matrices->ubo == 0) {
+		glGenBuffers(1, &this->common_matrices->ubo);
+	}
+	glBindBuffer(GL_UNIFORM_BUFFER, this->common_matrices->ubo);
+	glBufferData(GL_UNIFORM_BUFFER, this->common_matrices->size, nullptr, GL_DYNAMIC_DRAW);
+	glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+	if (!this->plane) {
+		this->plane = new VAO();
+		*this->plane = {};
+	}
+
+	if (this->plane->vao == 0) {
+		glGenVertexArrays(1, &this->plane->vao);
+	}
+	for (int i = 0; i < 4; ++i) {
+		if (this->plane->vbo[i] == 0) {
+			glGenBuffers(1, &this->plane->vbo[i]);
+		}
+	}
+	if (this->plane->ebo == 0) {
+		glGenBuffers(1, &this->plane->ebo);
+	}
+
+	bool needUpload = (this->plane->element_amount != expectedElements);
+
+	if (needUpload) {
+		vertices.clear();
+		normals.clear();
+		texcoords.clear();
+		colors.clear();
+		elements.clear();
+
+		const float step = waterSize / static_cast<float>(gridResolution);
+		const float halfSize = waterSize * 0.5f;
+		const size_t vertexCount = static_cast<size_t>(gridResolution + 1) * static_cast<size_t>(gridResolution + 1);
+
+		vertices.reserve(vertexCount * 3u);
+		normals.reserve(vertexCount * 3u);
+		texcoords.reserve(vertexCount * 2u);
+		colors.reserve(vertexCount * 3u);
+		elements.reserve(expectedElements);
+
+		for (int j = 0; j <= gridResolution; ++j) {
+			for (int i = 0; i <= gridResolution; ++i) {
+				float x = static_cast<float>(i) * step - halfSize;
+				float z = static_cast<float>(j) * step - halfSize;
+
+				vertices.push_back(x);
+				vertices.push_back(0.0f);
+				vertices.push_back(z);
+
+				normals.push_back(0.0f);
+				normals.push_back(1.0f);
+				normals.push_back(0.0f);
+
+				texcoords.push_back(static_cast<float>(i) / static_cast<float>(gridResolution));
+				texcoords.push_back(static_cast<float>(j) / static_cast<float>(gridResolution));
+
+				colors.push_back(0.1f);
+				colors.push_back(0.45f);
+				colors.push_back(0.75f);
+			}
+		}
+
+		for (int j = 0; j < gridResolution; ++j) {
+			for (int i = 0; i < gridResolution; ++i) {
+				GLuint topLeft = static_cast<GLuint>(j * (gridResolution + 1) + i);
+				GLuint topRight = topLeft + 1;
+				GLuint bottomLeft = static_cast<GLuint>((j + 1) * (gridResolution + 1) + i);
+				GLuint bottomRight = bottomLeft + 1;
+
+				elements.push_back(topLeft);
+				elements.push_back(bottomLeft);
+				elements.push_back(topRight);
+				elements.push_back(topRight);
+				elements.push_back(bottomLeft);
+				elements.push_back(bottomRight);
+			}
+		}
+
+		glBindVertexArray(this->plane->vao);
+
+		glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[0]);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), vertices.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
+		glEnableVertexAttribArray(0);
+
+		glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[1]);
+		glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat), normals.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
+		glEnableVertexAttribArray(1);
+
+		glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[2]);
+		glBufferData(GL_ARRAY_BUFFER, texcoords.size() * sizeof(GLfloat), texcoords.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 2), nullptr);
+		glEnableVertexAttribArray(2);
+
+		glBindBuffer(GL_ARRAY_BUFFER, this->plane->vbo[3]);
+		glBufferData(GL_ARRAY_BUFFER, colors.size() * sizeof(GLfloat), colors.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(sizeof(GLfloat) * 3), nullptr);
+		glEnableVertexAttribArray(3);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->plane->ebo);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, elements.size() * sizeof(GLuint), elements.data(), GL_STATIC_DRAW);
+
+		glBindVertexArray(0);
+	}
+
+	this->plane->element_amount = expectedElements;
+
+	sineWaveShader->Use();
+	GLint timeLoc = glGetUniformLocation(sineWaveShader->Program, "u_time");
+	if (timeLoc != -1) {
+		glUniform1f(timeLoc, time);
+	}
+	glUseProgram(0);
+}
+
+void TrainView::updateSine(float time) {
+	if (!sineWaveShader) {
+		return;
+	}
+
+	sineWaveShader->Use();
+	GLint timeLoc = glGetUniformLocation(sineWaveShader->Program, "u_time");
+	if (timeLoc != -1) {
+		glUniform1f(timeLoc, time);
+	}
+	glUseProgram(0);
+}
+
+void TrainView::updateSin(float time) {
+	updateSine(time);
 }
